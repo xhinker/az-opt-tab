@@ -1,0 +1,11 @@
+# Compiled binary
+/opt-tab
+*.o
+*.obj
+
+# macOS
+.DS_Store
+
+# Swift / Xcode
+.build/
+.swiftpm/
