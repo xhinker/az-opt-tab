@@ -663,8 +663,15 @@ final class Switcher {
     // 300ms tick: keep MRU in sync with real focus + fallback commit
     private var lastFocused: (pid: pid_t, wid: CGWindowID)? = nil
     private var tickCount = 0
+    private var debugCapturing = false   // suppress the Option-release fallback commit during a screenshot
     func tick() {
-        if active && !optionDownNow() {
+        // Screenshot trigger: create /tmp/opt-tab-shot to capture the overlay
+        if FileManager.default.fileExists(atPath: "/tmp/opt-tab-shot") {
+            try? FileManager.default.removeItem(atPath: "/tmp/opt-tab-shot")
+            debugCaptureScreenshot()
+            return
+        }
+        if active && !optionDownNow() && !debugCapturing {
             log("tick: Option released (fallback commit)")
             commit()
         }
@@ -692,6 +699,49 @@ final class Switcher {
         let entry = mru.list[candidateIndex % mru.list.count]
         log("commit → [\(entry.pid) wid=\(entry.wid)]")
         activateWindow(pid: entry.pid, wid: entry.wid)
+    }
+
+    /// Show the overlay, let thumbnails render, then capture the whole screen to a PNG.
+    func debugCaptureScreenshot() {
+        log("screenshot: showing overlay + capturing…")
+        if inventory.isEmpty { rebuildInventory() }
+        active = true
+        candidateIndex = 1
+        let ordered = mru.list.compactMap { e in inventory.first(where: { $0.wid == e.wid }) }
+        overlay.show(windows: ordered, selection: candidateIndex)
+        debugCapturing = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            Self.captureAndSaveScreen()
+            self.overlay.hide()
+            self.active = false
+            self.debugCapturing = false
+        }
+    }
+
+    static func captureAndSaveScreen() {
+        let path = "/tmp/opt-tab-screenshot.png"
+        Task { @MainActor in
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+                guard let display = content.displays.first else {
+                    log("screenshot: no display found"); return
+                }
+                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let config = SCStreamConfiguration()
+                config.width = Int(display.frame.width)
+                config.height = Int(display.frame.height)
+                config.showsCursor = true
+                let img = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                let rep = NSBitmapImageRep(cgImage: img)
+                guard let data = rep.representation(using: .png, properties: [:]) else {
+                    log("screenshot: PNG encode failed"); return
+                }
+                try data.write(to: URL(fileURLWithPath: path))
+                log("screenshot saved: \(path) (\(Int(img.width))x\(Int(img.height)))")
+            } catch {
+                log("screenshot failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     func rebuildInventory() {

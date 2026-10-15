@@ -8,6 +8,8 @@ Unlike the built-in `Cmd+Tab` (which switches *apps*), az-opt-tab switches **win
 Chrome tab A → VS Code window B → iTerm pane C. It covers **all Spaces**, so windows on other
 desktops are included, and it shows a **live thumbnail** of every window.
 
+![az-opt-tab — per-window switcher with live thumbnails](assets/opt-tab-view.png)
+
 ## Features
 
 - **Per-window** switching (not per-app), most-recently-used order like Windows Alt+Tab
