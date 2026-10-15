@@ -18,26 +18,58 @@ desktops are included, and it shows a **live thumbnail** of every window.
 - **Mouse** — scroll to navigate, click a row to jump straight to that window
 - **Fast** — 0ms to open, ~15–38ms to commit (window on screen)
 
-## Requirements
+## Setup (step by step)
 
-- macOS (built and tested on macOS 26 / Darwin 25). Uses only public APIs plus one long-stable
-  private bridge (`_AXUIElementGetWindow`, the same one yabai / alt-tab-macos use).
-- **Accessibility** permission (window activation + key monitoring).
-- **Screen Recording** permission (live thumbnails). Without it, rows fall back to app icons.
+### 1. Prerequisites
+- **macOS** (built and tested on macOS 26 / Darwin 25). Uses only public APIs plus one
+  long-stable private bridge (`_AXUIElementGetWindow`, the same one yabai / alt-tab-macos use).
+- **Xcode Command Line Tools** (to build the Swift source). If `swiftc` isn't on your machine:
+  ```bash
+  xcode-select --install          # installs the CLT (includes swiftc)
+  ```
+  If you have full Xcode and `swiftc` complains about the license:
+  ```bash
+  sudo xcodebuild -license accept
+  ```
 
-Both are granted in **System Settings → Privacy & Security**. When launched from a terminal the
-app inherits the terminal's grants; otherwise it prompts on startup.
-
-## Build & run
-
+### 2. Install tmux (recommended)
+`run.sh` launches the app in a persistent tmux session so you can watch its log and stop it
+cleanly. If you don't have tmux, install it via Homebrew:
 ```bash
-./run.sh                 # builds (if needed) and runs in a persistent tmux session "opt-tab"
-tmux attach -t opt-tab   # watch its log
-tmux kill-session -t opt-tab   # stop
+# install Homebrew first (skip if you already have it)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install tmux
+```
+> `run.sh` still works without tmux (it falls back to a background process + `opt-tab.log`),
+> but tmux makes watching the log and stopping the app much easier.
 
-# or build/run directly:
-swiftc -O -o opt-tab opt-tab.swift
-./opt-tab
+### 3. Grant permissions (one-time)
+The app needs two macOS permissions, set in **System Settings → Privacy & Security**:
+
+**Accessibility** — *required* (window activation + keyboard monitoring):
+1. System Settings → **Privacy & Security** → **Accessibility**
+2. Click **＋**, then add the binary: `~/az_git_folder/az-opt-tab/opt-tab`
+   (or the terminal app you launch from — a terminal-launched app inherits the terminal's grant)
+3. Make sure its toggle is **on**
+
+**Screen Recording** — *optional* (live thumbnails; without it, rows show app icons):
+1. System Settings → **Privacy & Security** → **Screen Recording**
+2. Click **＋**, add the same binary, toggle **on**
+
+> Easiest path: run `./run.sh` once — the app prompts for Accessibility on startup with an
+> "Open System Settings" button that jumps straight to the right panel.
+
+### 4. Run
+```bash
+./run.sh
+```
+`run.sh` builds the binary if it's missing, then starts the app in a tmux session named `opt-tab`.
+
+### 5. Manage
+```bash
+tmux attach -t opt-tab        # watch the live log   (detach: Ctrl+B then D)
+tmux kill-session -t opt-tab  # stop the app         (or: pkill -f opt-tab)
+./run.sh                      # start it again
 ```
 
 ## Usage
@@ -81,7 +113,7 @@ with `↑`/`↓` arrows when there are more windows and an `n / total` counter.
 ## Files
 
 - `opt-tab.swift` — the whole program (~750 lines, single file)
-- `run.sh` — tmux launcher
+- `run.sh` — launcher: builds the binary if missing, runs in a tmux session (background fallback if tmux is absent)
 
 ## Credits
 

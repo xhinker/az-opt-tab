@@ -293,9 +293,15 @@ final class RowView: NSView {
 // Each panel shows the same list; all panels update in sync.
 final class ScreenPanel {
     static let maxVisible = 10
-    static let rowH: CGFloat = 74
+    static let rowH: CGFloat = 64          // reduced from 74 (shorter rows)
     static let cardW: CGFloat = 520
-    static let cardH: CGFloat = 814
+    static let topChrome: CGFloat = 26     // top area (count label + up arrow)
+    static let bottomChrome: CGFloat = 48  // bottom area (down arrow)
+    /// Card height for a given number of visible rows — auto-shrinks when there
+    /// are fewer than maxVisible windows.
+    static func dynamicHeight(_ visible: Int) -> CGFloat {
+        topChrome + CGFloat(visible) * rowH + bottomChrome
+    }
 
     let screen: NSScreen
     let window: OverlayWindow
@@ -323,7 +329,7 @@ final class ScreenPanel {
 
     init(screen: NSScreen) {
         self.screen = screen
-        let size = NSSize(width: Self.cardW, height: Self.cardH)
+        let size = NSSize(width: Self.cardW, height: Self.dynamicHeight(Self.maxVisible))
         window = OverlayWindow(contentRect: NSRect(origin: .zero, size: size),
                                styleMask: [.borderless], backing: .buffered, defer: false)
         window.isOpaque = false
@@ -341,10 +347,6 @@ final class ScreenPanel {
         card.wantsLayer = true
         card.layer?.cornerRadius = 18
         card.layer?.masksToBounds = true
-
-        let cardW = card.widthAnchor.constraint(equalToConstant: size.width)
-        let cardH = card.heightAnchor.constraint(equalToConstant: size.height)
-        NSLayoutConstraint.activate([cardW, cardH])
 
         for arrow in [upArrow, downArrow] {
             arrow.font = .systemFont(ofSize: 16, weight: .medium)
@@ -397,10 +399,11 @@ final class ScreenPanel {
     private func rebuildSlots(_ count: Int) {
         for s in slots { s.row.removeFromSuperview() }
         slots.removeAll()
+        let rowH = Self.rowH
         for i in 0..<count {
-            let row = RowView(frame: NSRect(x: 12, y: 48 + CGFloat(count - 1 - i) * Self.rowH,
-                                            width: 496, height: Self.rowH))
-            let bg = NSView(frame: NSRect(x: 0, y: 2, width: 496, height: 70))
+            let row = RowView(frame: NSRect(x: 12, y: Self.bottomChrome + CGFloat(count - 1 - i) * rowH,
+                                            width: 496, height: rowH))
+            let bg = NSView(frame: NSRect(x: 0, y: 2, width: 496, height: rowH - 4))
             bg.wantsLayer = true
             bg.layer?.cornerRadius = 12
             bg.layer?.borderWidth = 0
@@ -410,12 +413,12 @@ final class ScreenPanel {
             num.font = .monospacedDigitSystemFont(ofSize: 14, weight: .regular)
             num.textColor = .tertiaryLabelColor
             num.alignment = .right
-            num.frame = NSRect(x: 0, y: 27, width: 32, height: 20)
+            num.frame = NSRect(x: 0, y: (rowH - 20) / 2, width: 32, height: 20)
 
-            let appIcon = NSImageView(frame: NSRect(x: 38, y: 21, width: 32, height: 32))
+            let appIcon = NSImageView(frame: NSRect(x: 38, y: (rowH - 32) / 2, width: 32, height: 32))
             appIcon.imageScaling = .scaleProportionallyUpOrDown
 
-            let thumb = NSImageView(frame: NSRect(x: 78, y: 3, width: 140, height: 68))
+            let thumb = NSImageView(frame: NSRect(x: 78, y: 3, width: 140, height: rowH - 6))
             thumb.wantsLayer = true
             thumb.layer?.cornerRadius = 7
             thumb.layer?.masksToBounds = true
@@ -426,7 +429,7 @@ final class ScreenPanel {
             label.font = .systemFont(ofSize: 14)
             label.textColor = .secondaryLabelColor
             label.lineBreakMode = .byTruncatingTail
-            label.frame = NSRect(x: 228, y: 28, width: 268, height: 18)
+            label.frame = NSRect(x: 228, y: (rowH - 18) / 2, width: 268, height: 18)
 
             row.addSubview(bg)
             row.addSubview(num)
@@ -460,6 +463,10 @@ final class ScreenPanel {
         if slots.count != visible {
             rebuildSlots(visible)
         }
+        let H = Self.dynamicHeight(visible)
+        if abs(window.frame.height - H) > 0.5 {
+            window.setContentSize(NSSize(width: Self.cardW, height: H))
+        }
 
         var changed: Set<CGWindowID> = []
         for i in 0..<visible {
@@ -483,11 +490,9 @@ final class ScreenPanel {
         downArrow.isHidden = start + visible >= n
         countLabel.stringValue = "\(selection + 1) / \(n)"
 
-        if !window.isVisible {
-            let f = screen.frame
-            window.setFrameOrigin(NSPoint(x: f.midX - Self.cardW / 2,
-                                          y: f.midY - Self.cardH / 2 + 20))
-        }
+        let f = screen.frame
+        window.setFrameOrigin(NSPoint(x: f.midX - Self.cardW / 2,
+                                      y: f.midY - H / 2 + 20))
         window.orderFrontRegardless()
         return changed
     }
@@ -671,8 +676,11 @@ final class Switcher {
             mru.moveToFront(front.processIdentifier, wid)   // reorder only on focus change
         }
         // Keep the inventory warm + current in the background — never on the Tab path.
+        // FROZEN while the switcher is open: a mid-navigation refresh would prune the
+        // MRU list to a smaller AX snapshot and make the total jump under the user.
+        // The list is captured on press, stays stable while held, and refreshes on close.
         tickCount += 1
-        if tickCount % 7 == 0 {
+        if tickCount % 7 == 0 && !active {
             rebuildInventory()
         }
     }
@@ -698,21 +706,23 @@ final class Switcher {
 // A CGEventTap on keyDown sees the system's key auto-repeat, so HOLDING Tab fires
 // repeated events → auto-advance. Throttled in Switcher.step to a comfortable rate.
 func installTabTap() {
-    let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+    let mask = CGEventMask((1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue))
     guard let tap = CGEvent.tapCreate(
         tap: .cgSessionEventTap,
         place: .headInsertEventTap,
-        options: .listenOnly,
+        options: .defaultTap,   // active: lets us CONSUME Option+Tab so the background app (Chrome) never sees it
         eventsOfInterest: mask,
         callback: { _, type, event, _ -> Unmanaged<CGEvent>? in
-            if type == .keyDown,
-               event.getIntegerValueField(.keyboardEventKeycode) == 48 {   // Tab
+            if event.getIntegerValueField(.keyboardEventKeycode) == 48 {   // Tab
                 let flags = event.flags
                 if flags.contains(.maskAlternate) {                        // Option held
-                    let direction = flags.contains(.maskShift) ? -1 : 1
-                    DispatchQueue.main.async {
-                        Switcher.shared.hotkeyFired(direction: direction)
+                    if type == .keyDown {
+                        let direction = flags.contains(.maskShift) ? -1 : 1
+                        DispatchQueue.main.async {
+                            Switcher.shared.hotkeyFired(direction: direction)
+                        }
                     }
+                    return nil   // consume keyDown+keyUp: background apps don't react to Option+Tab
                 }
             }
             return Unmanaged.passUnretained(event)
