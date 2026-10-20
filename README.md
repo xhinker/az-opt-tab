@@ -10,6 +10,15 @@ desktops are included, and it shows a **live thumbnail** of every window.
 
 ![az-opt-tab — per-window switcher with live thumbnails](assets/opt-tab-view.png)
 
+## What's new
+
+- **v18 (2026-10-20) — single-window activation.** Committing to a window now brings
+  **only that window** to the front. Previously `NSRunningApplication.activate()` fronted
+  the whole app, so *every* window of that app (e.g. all your Chrome windows) popped up
+  above the app you were on. It now uses the WindowServer call
+  `_SLPSSetFrontProcessWithOptions` with the specific window id, which raises just that
+  window. (This also adds a second private symbol — see the build note below.)
+
 ## Features
 
 - **Per-window** switching (not per-app), most-recently-used order like Windows Alt+Tab
@@ -23,8 +32,10 @@ desktops are included, and it shows a **live thumbnail** of every window.
 ## Setup (step by step)
 
 ### 1. Prerequisites
-- **macOS** (built and tested on macOS 26 / Darwin 25). Uses only public APIs plus one
-  long-stable private bridge (`_AXUIElementGetWindow`, the same one yabai / alt-tab-macos use).
+- **macOS** (built and tested on macOS 26 / Darwin 25). Uses public APIs plus two
+  long-stable private symbols — `_AXUIElementGetWindow` and
+  `_SLPSSetFrontProcessWithOptions` (the same ones yabai / alt-tab-macos use). `run.sh`
+  links the private `SkyLight.framework` automatically, so a plain `./run.sh` is all you need.
 - **Xcode Command Line Tools** (to build the Swift source). If `swiftc` isn't on your machine:
   ```bash
   xcode-select --install          # installs the CLT (includes swiftc)
@@ -96,7 +107,7 @@ with `↑`/`↓` arrows when there are more windows and an `n / total` counter.
 | Global hotkey + auto-repeat | A `CGEventTap` on the Tab key sees the system's key auto-repeat, so **holding** Tab fires repeated events → auto-advance (throttled to ~10/sec) |
 | Window inventory (all Spaces) | Per-app Accessibility `kAXWindowsAttribute` over `NSWorkspace.runningApplications` |
 | MRU ordering | AX `kAXFocusedWindowAttribute` polled at 300ms; reorders only on focus change so the list is stable while navigating |
-| Window activation | `NSRunningApplication.activate()` + `kAXRaiseAction` (the raise alone makes the window key+focused) |
+| Window activation | `_SLPSSetFrontProcessWithOptions(psn, wid, userGenerated)` — fronts the process and raises **only** the target window (not all the app's windows) — then `kAXRaiseAction` to make it key+focused |
 | wid ↔ AX element bridge | `_AXUIElementGetWindow` (private, stable 15+ years) |
 | Option-release (commit) | `NSEvent` `.flagsChanged` monitor + a 300ms tick fallback (`CGEvent(source: nil).flags`) |
 | Live thumbnails | One low-res `SCStream` per visible window (1 fps) → frames converted on background queues into a RAM cache; a slow 500ms timer applies them to the UI and **pauses while you're navigating** so Tab stays at top priority |

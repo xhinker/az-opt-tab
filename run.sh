@@ -7,7 +7,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 # 1. Build if the binary is missing (it's gitignored)
 if [ ! -x ./opt-tab ]; then
   echo "building opt-tab (first run)..."
-  swiftc -O -o opt-tab opt-tab.swift || { echo "BUILD FAILED (try: sudo xcodebuild -license accept)"; exit 1; }
+  swiftc -O -F /System/Library/PrivateFrameworks -framework SkyLight -o opt-tab opt-tab.swift || { echo "BUILD FAILED (try: sudo xcodebuild -license accept)"; exit 1; }
 fi
 
 # 2. Already running? (consistent check for tmux or background launches)

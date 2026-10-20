@@ -111,13 +111,32 @@ func allWindows() -> [Win] {
     return wins
 }
 
+// MARK: - WindowServer (SkyLight) private API for single-window activation
+//
+// NSRunningApplication.activate() fronts the whole app, which drags EVERY one of
+// its windows forward (the "all Chrome windows pop up" bug). The WindowServer call
+// _SLPSSetFrontProcessWithOptions, given a specific window id, fronts the process
+// and raises ONLY that window. Mode userGenerated (0x200) marks the switch as
+// user-initiated; we deliberately do NOT pass allWindows (0x100).
+enum SLPSMode: UInt32 {
+    case allWindows = 0x100
+    case userGenerated = 0x200
+    case noWindows = 0x400
+}
+@_silgen_name("_SLPSSetFrontProcessWithOptions")
+func _SLPSSetFrontProcessWithOptions(_ psn: UnsafeMutablePointer<ProcessSerialNumber>, _ wid: CGWindowID, _ mode: SLPSMode.RawValue) -> CGError
+@_silgen_name("GetProcessForPID")
+func GetProcessForPID(_ pid: pid_t, _ psn: UnsafeMutablePointer<ProcessSerialNumber>) -> Int32
+
 func activateWindow(pid: pid_t, wid: CGWindowID) {
-    // 1) bring the owning app to the front — NSRunningApplication.activate() is
-    //    ~1-2ms (vs 49ms for the AX kAXFrontmost round-trip).
-    NSRunningApplication(processIdentifier: pid)?.activate()
-    // 2) raise the specific window. kAXRaiseAction ALONE makes the window key +
-    //    focused (verified: the raised window becomes the app's focused window),
-    //    so we skip the separate kAXMain/kAXFocused round-trips (~30-50ms saved).
+    // 1) front the process AND raise ONLY this window (not all the app's windows).
+    //    _SLPSSetFrontProcessWithOptions with a specific wid does exactly that.
+    var psn = ProcessSerialNumber()
+    if GetProcessForPID(pid, &psn) == 0 {
+        _SLPSSetFrontProcessWithOptions(&psn, wid, SLPSMode.userGenerated.rawValue)
+    }
+    // 2) raise the specific window within the app's own stack + make it key.
+    //    kAXRaiseAction makes the window key + focused (verified in v13).
     if let w = axWindowCache[wid] {
         AXUIElementPerformAction(w, kAXRaiseAction as CFString)
         return
