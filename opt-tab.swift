@@ -669,6 +669,7 @@ final class Switcher {
         overlay.hide()
         let entry = mru.list[idx % mru.list.count]
         log("mouse commit → [\(entry.pid) wid=\(entry.wid)]")
+        mru.moveToFront(entry.pid, entry.wid)
         activateWindow(pid: entry.pid, wid: entry.wid)
     }
 
@@ -717,6 +718,10 @@ final class Switcher {
         guard !mru.list.isEmpty else { return }
         let entry = mru.list[candidateIndex % mru.list.count]
         log("commit → [\(entry.pid) wid=\(entry.wid)]")
+        // The window we just switched to IS the most-recently-used one — assert it
+        // immediately instead of waiting for the 300ms focus poll (which can land
+        // after the user re-opens the switcher, or be skipped on a nil AX read).
+        mru.moveToFront(entry.pid, entry.wid)
         activateWindow(pid: entry.pid, wid: entry.wid)
     }
 
@@ -767,6 +772,14 @@ final class Switcher {
         inventory = allWindows()
         mru.prune(live: Set(inventory.map { $0.wid }),
                   newWindows: inventory.map { ($0.pid, $0.wid) })
+        // prune() appends re-appeared windows to the END of the MRU list. Apps like
+        // Chrome re-create windows (new CGWindowID on minimize/restore or Space
+        // moves), so the window you're actually looking at can get demoted to the
+        // bottom. Re-assert the focused window at the front.
+        if let front = NSWorkspace.shared.frontmostApplication,
+           let wid = focusedWindowID(pid: front.processIdentifier) {
+            mru.moveToFront(front.processIdentifier, wid)
+        }
         ThumbnailStreamer.shared.prune(live: Set(inventory.map { $0.wid }))
     }
 }
